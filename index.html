@@ -1,0 +1,165 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PONG 2.0: TACTICAL SUITE</title>
+<style>
+    body{margin:0;background:#050505;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;color:#fff;font-family:'Courier New', Courier, monospace}
+    canvas{background:#000;border:4px solid #333;display:block;box-shadow: 0 0 50px rgba(0,255,255,0.1); max-width: 95vw; max-height: 90vh;}
+</style></head>
+<body><canvas id="g" width="1000" height="500"></canvas>
+<script>
+const c=document.getElementById("g"),x=c.getContext("2d");
+let s="menu",m="1vAI",diff="pro",w=null,sc1=0,sc2=0,shake=0,au=null;
+const P=10,H=70,MAX=100;
+let k={},parts=[],pds={};
+let b={x:500,y:250,r:7,sx:5,sy:3,fx:0};
+
+function playSound(freq, dur, type="sine", ramp=true) {
+    try {
+        if(!au) au = new (window.AudioContext || window.webkitAudioContext)();
+        if(au.state === 'suspended') au.resume();
+        let o=au.createOscillator(), g=au.createGain();
+        o.type=type; o.frequency.setValueAtTime(freq, au.currentTime);
+        if(ramp) o.frequency.exponentialRampToValueAtTime(10, au.currentTime + dur);
+        g.gain.setValueAtTime(0.1, au.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, au.currentTime + dur);
+        o.connect(g); g.connect(au.destination);
+        o.start(); o.stop(au.currentTime + dur);
+    } catch(e) {}
+}
+
+window.addEventListener("keydown",e=>{ 
+    const key = e.key.toLowerCase(); k[key]=1; 
+    if(s=="menu"){
+        // 1vAI Keys
+        if(key=="1"){ m="1vAI"; diff="rookie"; s="play"; rs(); }
+        if(key=="2"){ m="1vAI"; diff="pro"; s="play"; rs(); }
+        if(key=="3"){ m="1vAI"; diff="master"; s="play"; rs(); }
+        // 2vAI Keys
+        if(key=="4"){ m="2vAI"; diff="pro"; s="play"; rs(); }
+        if(key=="5"){ m="2vAI"; diff="master"; s="play"; rs(); }
+    }
+    if(key=="escape") { s="menu"; w=null; sc1=sc2=0; }
+    if(key=="r"&&w) rs(); 
+});
+window.addEventListener("keyup",e=>k[e.key.toLowerCase()]=0);
+
+function rs(){ 
+    sc1=sc2=0; w=null; 
+    if(m=="1vAI") {
+        pds = {
+            p1: {x:20,  y:215, h:0, f:50, st:0, side:1, ctrl:['w','s','a','d'], ai:false},
+            p2: {x:970, y:215, h:0, f:50, st:0, side:0, ctrl:[], ai:true, type:'goalie'}
+        };
+    } else {
+        pds = {
+            p1: {x:120, y:215, h:0, f:50, st:0, side:1, ctrl:['w','s','a','d'], ai:false},
+            p2: {x:20,  y:215, h:0, f:50, st:0, side:1, ctrl:['t','g','f','h'], ai:false},
+            p3: {x:870, y:215, h:0, f:50, st:0, side:0, ctrl:[], ai:true, type:'guard'},
+            p4: {x:970, y:215, h:0, f:50, st:0, side:0, ctrl:[], ai:true, type:'goalie'}
+        };
+    }
+    rb(m=="1vAI"?5:6); parts=[];
+    playSound(440, 0.1, "sine", false);
+}
+
+function rb(d){ b.x=500; b.y=250; b.sx=d*(Math.random()>.5?1:-1); b.sy=(Math.random()>.5?3:-3); }
+function cl(v,a,b){ return Math.max(a,Math.min(b,v)); }
+
+function spawnParts(count, color, speed) {
+    for(let i=0; i<count; i++) parts.push({x:b.x, y:b.y, vx:(Math.random()-0.5)*speed, vy:(Math.random()-0.5)*speed, life:1.0, c:color});
+}
+
+function updP(p) {
+    if(p.st > 0) { p.st--; p.h -= 0.5; } 
+    else {
+        let mv = 0;
+        if(p.ai) {
+            let speedLimit = diff=="rookie"?3.5:diff=="pro"?7.5:12;
+            let targetY = b.y - H/2;
+            if(p.type === 'goalie' && Math.abs(p.x - b.x) > 600) targetY = 215;
+            if(p.y < targetY - 5) mv = 1; else if(p.y > targetY + 5) mv = -1;
+            p.y += mv * cl(speedLimit, 0, (p.h > 75 ? 3 : 12));
+        } else {
+            if(k[p.ctrl[0]]) mv=-1; if(k[p.ctrl[1]]) mv=1;
+            p.y += mv * (p.h > 75 ? 3 : 8);
+        }
+        p.h = mv!==0 ? p.h+0.6 : p.h-1.0;
+        p.f = p.h<35 ? p.f+0.35 : (p.h>80?p.f-0.15:p.f);
+        if(p.h >= MAX) { p.st=120; playSound(80, 0.5, "sawtooth"); }
+    }
+    p.y = cl(p.y, 0, 500-H); p.h = cl(p.h, 0, MAX); p.f = cl(p.f, 0, MAX);
+}
+
+function coll(p) {
+    let bo=1, cost=10, isSp=false;
+    if(p.st<=0){
+        let specialChance = diff=="rookie"?0.05:diff=="pro"?0.35:0.85;
+        let boost = p.ai ? (p.f >= 60 && Math.random() < specialChance) : k[p.ctrl[3]]; 
+        let slow = p.ai ? false : k[p.ctrl[2]];
+        if((boost||slow) && p.f>=50) { bo=boost?2.2:0.35; cost=50; isSp=true; }
+    }
+    if(isSp){ p.h+=25; shake=25; spawnParts(30,"#0ff",16); playSound(150,0.4,"triangle"); }
+    else { shake=8; spawnParts(10,"#fff",6); playSound(300,0.1); }
+    b.sx = (p.side?1:-1) * Math.abs(b.sx*1.08*bo*(0.7+p.f/100));
+    b.sy = -((p.y+H/2)-b.y)/(H/2)*8.5;
+    b.x = p.side ? p.x+P+b.r+2 : p.x-b.r-2;
+    p.f = cl(p.f-cost, 0, MAX);
+    b.fx = bo>1.1?15:(bo<0.9?-15:0);
+}
+
+function loop(){
+    let sx=(Math.random()-0.5)*shake, sy=(Math.random()-0.5)*shake;
+    if(shake>0) shake*=0.82;
+    x.setTransform(1,0,0,1,0,0); x.fillStyle="#000"; x.fillRect(0,0,1000,500); x.translate(sx,sy);
+    
+    if(s=="menu"){
+        x.fillStyle="#0ff"; x.textAlign="center"; x.font="bold 45px Courier New"; x.fillText("PONG 2.0: TACTICAL HUB", 500, 100);
+        x.fillStyle="#fff"; x.font="18px Courier New";
+        x.fillText("CLASSIC 1-ON-1:", 500, 170);
+        x.fillText("[1] ROOKIE  [2] PRO  [3] MASTER", 500, 200);
+        x.fillText("CO-OP 2-ON-AI:", 500, 270);
+        x.fillText("[4] TEAM PRO  [5] TEAM MASTER", 500, 300);
+        x.font="12px Courier New"; x.fillStyle="#444";
+        x.fillText("P1: W/S (MOVE) D (FLICK) | P2: T/G (MOVE) H (FLICK)", 500, 460);
+    } else if(w){
+        x.fillStyle="#0ff"; x.font="50px Courier New"; x.textAlign="center"; x.fillText(w + " WINS", 500, 250);
+        x.font="20px Courier New"; x.fillStyle="#fff"; x.fillText("PRESS 'R' TO RESTART", 500, 310);
+    } else {
+        Object.values(pds).forEach(p => updP(p));
+        for(let i=0; i<4; i++){
+            b.x += b.sx/4; b.y += b.sy/4;
+            Object.values(pds).forEach(p=>{
+                if(b.x+b.r>=p.x && b.x-b.r<=p.x+P && b.y>=p.y && b.y<=p.y+H) coll(p);
+            });
+        }
+        if(b.y<b.r || b.y>500-b.r){ b.sy*=-1; b.y=cl(b.y,b.r,500-b.r); playSound(600,0.05); }
+        if(b.x<-30){ sc2++; rb(m=="1vAI"?5:6); playSound(100,0.5); }
+        if(b.x>1030){ sc1++; rb(m=="1vAI"?-5:-6); playSound(100,0.5); }
+        if(sc1>=10) w="PLAYERS"; if(sc2>=10) w=diff=="master"?"SKYNET":"BOTS";
+
+        for(let i=parts.length-1; i>=0; i--){
+            let p=parts[i]; p.x+=p.vx; p.y+=p.vy; p.life-=0.025;
+            if(p.life<=0) parts.splice(i,1); else { x.globalAlpha=p.life; x.fillStyle=p.c; x.fillRect(p.x,p.y,3,3); }
+        }
+        x.globalAlpha=1;
+        Object.values(pds).forEach(p=>{
+            // Top Bar: Power (Blue for humans, Purple for AI)
+            x.fillStyle="#222"; x.fillRect(p.x, p.y-14, 20, 4);
+            x.fillStyle=p.ai?"#f0f":"#0ff"; x.fillRect(p.x, p.y-14, (p.f/MAX)*20, 4);
+            
+            // Bottom Bar: Heat (Red)
+            x.fillStyle="#222"; x.fillRect(p.x, p.y-8, 20, 3);
+            x.fillStyle="#f33"; x.fillRect(p.x, p.y-8, (p.h/MAX)*20, 3);
+            
+            // Paddle
+            x.fillStyle=p.st>0?"#f00":"#fff"; x.fillRect(p.x,p.y,P,H);
+        });
+        x.save(); if(b.fx>0){x.shadowBlur=25;x.shadowColor="yellow";b.fx--;}
+        else if(b.fx<0){x.shadowBlur=25;x.shadowColor="#0ff";x.fillStyle="#0ff";b.fx++;}
+        x.beginPath(); x.arc(b.x,b.y,b.r,0,Math.PI*2); x.fill(); x.restore();
+        x.fillStyle="#fff"; x.font="30px Courier New"; x.textAlign="center"; x.fillText(sc1+" : "+sc2, 500, 40);
+    }
+    requestAnimationFrame(loop);
+}
+loop();
+</script></body></html>
